@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de Cámara</title>
+    <style>
+        body {
+            font-family: monospace;
+            background-color: #111;
+            color: #eee;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+            padding: 1rem;
+        }
+        #status {
+            font-size: 1.2em;
+            margin-bottom: 1rem;
+        }
+        #error-info {
+            color: #ff4122;
+            font-weight: bold;
+        }
+        video {
+            max-width: 100%;
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+
+    <p id="status">Iniciando prueba de acceso a la cámara...</p>
+    <p id="error-info"></p>
+    <video id="video" playsinline autoplay muted></video>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const errorEl = document.getElementById('error-info');
+        const videoEl = document.getElementById('video');
+
+        async function startCameraTest() {
+            // Comprobamos si el navegador soporta esta función
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                statusEl.textContent = 'ERROR';
+                errorEl.textContent = 'Tu navegador no soporta la API de cámara (getUserMedia).';
+                return;
+            }
+
+            statusEl.textContent = 'Solicitando permiso para la cámara... Revisa si ha saltado un aviso.';
+
+            try {
+                // Pedimos acceso a la cámara trasera preferiblemente
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+
+                // ¡ÉXITO!
+                statusEl.textContent = '¡PERMISO CONCEDIDO! Cámara funcionando.';
+                errorEl.textContent = '';
+                videoEl.srcObject = stream;
+
+            } catch (error) {
+                // ¡FALLO! Mostramos el motivo exacto.
+                statusEl.textContent = 'FALLO AL ACCEDER A LA CÁMARA.';
+                errorEl.innerHTML = `
+                    <p>Nombre del Error: ${error.name}</p>
+                    <p>Mensaje: ${error.message}</p>
+                `;
+                console.error(error);
+            }
+        }
+
+        startCameraTest();
+    </script>
+
+</body>
+</html>
