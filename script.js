@@ -1,6 +1,7 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+// Importamos las herramientas de bajo nivel que SÍ funcionan
+import { AutoImageProcessor, AutoModelForImageClassification } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// --- Módulo para la Interfaz de Usuario ---
+// --- Módulo para la Interfaz de Usuario (Sin cambios) ---
 const UI = {
     init() {
         this.bootLoader = document.getElementById('boot-loader');
@@ -65,7 +66,7 @@ const UI = {
     }
 };
 
-// --- Módulo para la Cámara y el Renderizado ---
+// --- Módulo para la Cámara y el Renderizado (Sin cambios) ---
 const Camera = {
     init(videoElement, canvasContext) {
         this.video = videoElement;
@@ -115,17 +116,16 @@ const Camera = {
     }
 };
 
-// --- Módulo de la IA ---
+// --- Módulo de la IA (RECONSTRUIDO DESDE CERO) ---
 const AI = {
     async init() {
+        const modelPath = './models/mobilenet_v2_1.0_224';
         try {
-            // ==========================================================
-            // =================== EL PUTO ARREGLO ======================
-            // Quitamos la opción ", { quantized: true }" que lo estaba jodiendo todo.
-            // La librería es lo bastante lista para encontrar el archivo _quantized.onnx por sí misma.
-            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224');
-            // ==========================================================
-            // ==========================================================
+            // Cargamos las dos piezas por separado, forzando la ruta local.
+            // 1. El preprocesador (prepara la imagen)
+            this.processor = await AutoImageProcessor.from_pretrained(modelPath);
+            // 2. El modelo (analiza la imagen)
+            this.model = await AutoModelForImageClassification.from_pretrained(modelPath);
             return true;
         } catch (error) {
             console.error("Error loading AI model:", error);
@@ -134,13 +134,29 @@ const AI = {
         }
     },
     async classifyImage(imageDataUrl) {
-        if (!this.classifier) return [];
-        const results = await this.classifier(imageDataUrl);
-        return results;
+        if (!this.model || !this.processor) return [];
+        try {
+            // Usamos las piezas a mano
+            const image = await this.processor(imageDataUrl);
+            const output = await this.model(image);
+            
+            // Procesamos la salida para que sea legible
+            const top5 = output.logits.topk(5);
+            const results = [];
+            for (let i = 0; i < top5.indices.data.length; ++i) {
+                const label = this.model.config.id2label[top5.indices.data[i]];
+                const score = top5.values.data[i];
+                results.push({ label, score });
+            }
+            return results;
+        } catch (error) {
+            console.error("Error during classification:", error);
+            return [];
+        }
     }
 };
 
-// --- Módulo Principal del Juego ---
+// --- Módulo Principal del Juego (Sin cambios) ---
 const Game = {
     state: {
         objectives: [
@@ -184,7 +200,7 @@ const Game = {
         UI.scanButton.disabled = true;
         
         const frame = Camera.captureFrame();
-        const results = (await AI.classifyImage(frame)).slice(0, 5);
+        const results = await AI.classifyImage(frame);
         
         UI.displayScanResults(results);
         UI.logAction('Análisis completado. Si ves un objetivo válido, haz clic para recuperar.');
