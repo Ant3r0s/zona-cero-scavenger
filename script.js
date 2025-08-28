@@ -78,18 +78,23 @@ const UI = {
 
 const AI = {
     async init() {
+        const loaderProgress = document.getElementById('loader-progress');
+        // Este es un loader de mentira, porque el modelo local es tan rápido que no da tiempo a verlo.
+        // Lo dejamos para la atmósfera.
+        if(loaderProgress) loaderProgress.textContent = 'WAKING UP ENTITY...';
         try {
-            this.classifier = await pipeline('image-classification', 'Xenova/mobilenet_v2_1.0_224', { quantized: true });
+            // ESTA ES LA LÍNEA IMPORTANTE. APUNTA A LA CARPETA LOCAL.
+            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
             return true;
         } catch (error) {
             console.error("Error loading AI model:", error);
+            if(loaderProgress) loaderProgress.textContent = 'SYSTEM_FAILURE: AI entity could not be loaded.';
             return false;
         }
     },
     async classifyImage(imageUrl) {
         if (!this.classifier) return [];
         const results = await this.classifier(imageUrl);
-        // Devolvemos solo los 5 más probables
         return results.slice(0, 5);
     }
 };
@@ -105,23 +110,22 @@ const Game = {
             image: 'scenes/scene1.jpg',
             items: ['botiquín', 'lata de comida', 'chatarra']
         },
-        // Aquí se añadirían más localizaciones
     ],
     async init() {
         UI.init();
-        await UI.runBootSequence(async () => {
-            if (!await AI.init()) {
-                UI.bootText.textContent += "ERROR CRÍTICO. Imposible iniciar la IA.\n";
-            }
+        // Usamos un loader de mentira porque el modelo local carga al instante.
+        // Así mantenemos la atmósfera del arranque.
+        UI.runBootSequence(async () => {
+             await AI.init();
         });
         
         UI.showLocation(this.locations[this.state.currentLocation]);
         UI.updateHUD(this.state);
-        setInterval(() => this.gameLoop(), 1000); // El tiempo pasa...
+        setInterval(() => this.gameLoop(), 1000); 
     },
     gameLoop() {
         if (this.state.battery > 0) {
-            this.state.battery -= 0.5; // La batería se gasta lentamente
+            this.state.battery -= 0.5;
             UI.updateHUD(this.state);
         } else if (!UI.scanButton.disabled) {
             UI.logAction('BATERÍA AGOTADA. DRON DESCONECTADO.');
@@ -133,7 +137,7 @@ const Game = {
             UI.logAction('Batería demasiado baja para escanear.');
             return;
         }
-        UI.logAction('Escaneando... Esto consumirá un 10% de batería.');
+        UI.logAction('Escaneando... Consumo: 10% de batería.');
         this.state.battery -= 10;
         UI.scanButton.disabled = true;
         
