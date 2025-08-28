@@ -12,7 +12,8 @@
 <body>
     <div class="scanlines"></div>
     <div class="vignette"></div>
-    
+    <div id="static-overlay"></div>
+
     <div id="boot-loader">
         <div id="boot-text"></div>
         <p id="permission-prompt" class="hidden">>> Se necesita acceso a la cámara para iniciar el dron...</p>
@@ -22,7 +23,6 @@
         <div id="drone-view-container">
             <canvas id="drone-canvas"></canvas>
             <video id="video-feed" playsinline autoplay muted class="hidden"></video>
-            <div id="static-overlay"></div>
         </div>
 
         <div id="hud">
@@ -48,6 +48,9 @@
         </div>
     </div>
 
-    <script src="script.js" type="module"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@latest/dist/mobilenet.min.js"></script>
+    
+    <script src="script.js"></script>
 </body>
 </html>
