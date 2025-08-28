@@ -1,7 +1,4 @@
-// Importamos las herramientas de bajo nivel que SÍ funcionan
-import { AutoImageProcessor, AutoModelForImageClassification } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-
-// --- Módulo para la Interfaz de Usuario (Sin cambios) ---
+// --- Módulo para la Interfaz de Usuario ---
 const UI = {
     init() {
         this.bootLoader = document.getElementById('boot-loader');
@@ -42,15 +39,17 @@ const UI = {
     },
     displayScanResults(results) {
         this.resultsList.innerHTML = '';
-        if (results.length === 0) {
+        if (!results || results.length === 0) {
             this.resultsList.innerHTML = '<li>>> INTERFERENCIAS. NINGÚN OBJETO CLARO.</li>';
             return;
         }
         results.forEach(item => {
             const li = document.createElement('li');
-            const confidence = Math.round(item.score * 100);
-            li.textContent = `>> ${item.label.toUpperCase()} (Confianza: ${confidence}%)`;
-            const objective = Game.state.objectives.find(o => item.label.includes(o.name) && !o.found);
+            const confidence = Math.round(item.probability * 100);
+            const label = item.className.split(',')[0];
+            li.textContent = `>> ${label.toUpperCase()} (Confianza: ${confidence}%)`;
+
+            const objective = Game.state.objectives.find(o => label.includes(o.name) && !o.found);
             if (objective && confidence > 40) {
                 li.style.color = '#39ff14';
                 li.style.cursor = 'pointer';
@@ -66,7 +65,7 @@ const UI = {
     }
 };
 
-// --- Módulo para la Cámara y el Renderizado (Sin cambios) ---
+// --- Módulo para la Cámara y el Renderizado ---
 const Camera = {
     init(videoElement, canvasContext) {
         this.video = videoElement;
@@ -101,31 +100,22 @@ const Camera = {
         const data = imageData.data;
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i], g = data[i+1], b = data[i+2];
-            const tr = 0.393 * r + 0.769 * g + 0.189 * b;
-            const tg = 0.349 * r + 0.686 * g + 0.168 * b;
-            const tb = 0.272 * r + 0.534 * g + 0.131 * b;
-            const noise = (0.5 - Math.random()) * 20;
-            data[i] = tr + noise;
-            data[i+1] = tg + noise;
-            data[i+2] = tb + noise;
+            const avg = (r + g + b) / 3;
+            data[i] = avg + 40;     // Tinte verdoso/ambar
+            data[i + 1] = avg + 20;
+            data[i + 2] = avg;
+            const noise = (0.5 - Math.random()) * 25;
+            data[i] += noise; data[i+1] += noise; data[i+2] += noise;
         }
         this.ctx.putImageData(imageData, 0, 0);
-    },
-    captureFrame() {
-        return this.ctx.canvas.toDataURL('image/jpeg');
     }
 };
 
-// --- Módulo de la IA (RECONSTRUIDO DESDE CERO) ---
+// --- Módulo de la IA (CON TENSORFLOW.JS) ---
 const AI = {
     async init() {
-        const modelPath = './models/mobilenet_v2_1.0_224';
         try {
-            // Cargamos las dos piezas por separado, forzando la ruta local.
-            // 1. El preprocesador (prepara la imagen)
-            this.processor = await AutoImageProcessor.from_pretrained(modelPath);
-            // 2. El modelo (analiza la imagen)
-            this.model = await AutoModelForImageClassification.from_pretrained(modelPath);
+            this.model = await mobilenet.load();
             return true;
         } catch (error) {
             console.error("Error loading AI model:", error);
@@ -133,22 +123,11 @@ const AI = {
             return false;
         }
     },
-    async classifyImage(imageDataUrl) {
-        if (!this.model || !this.processor) return [];
+    async classifyImage(canvasElement) {
+        if (!this.model) return [];
         try {
-            // Usamos las piezas a mano
-            const image = await this.processor(imageDataUrl);
-            const output = await this.model(image);
-            
-            // Procesamos la salida para que sea legible
-            const top5 = output.logits.topk(5);
-            const results = [];
-            for (let i = 0; i < top5.indices.data.length; ++i) {
-                const label = this.model.config.id2label[top5.indices.data[i]];
-                const score = top5.values.data[i];
-                results.push({ label, score });
-            }
-            return results;
+            const predictions = await this.model.classify(canvasElement);
+            return predictions;
         } catch (error) {
             console.error("Error during classification:", error);
             return [];
@@ -156,7 +135,7 @@ const AI = {
     }
 };
 
-// --- Módulo Principal del Juego (Sin cambios) ---
+// --- Módulo Principal del Juego ---
 const Game = {
     state: {
         objectives: [
@@ -176,7 +155,6 @@ const Game = {
         UI.permissionPrompt.classList.remove('hidden');
         const cameraOK = await Camera.start();
         UI.permissionPrompt.classList.add('hidden');
-
         if (!cameraOK) return;
         
         await UI.showBootMessage('SIGNAL ACQUIRED. VISUAL FEED ESTABLISHED.');
@@ -196,12 +174,9 @@ const Game = {
         UI.logAction('Dron operativo. Encuentra los objetos de la lista.');
     },
     async scanFrame() {
-        UI.logAction('Capturando y analizando fotograma...');
+        UI.logAction('Analizando fotograma...');
         UI.scanButton.disabled = true;
-        
-        const frame = Camera.captureFrame();
-        const results = await AI.classifyImage(frame);
-        
+        const results = await AI.classifyImage(UI.canvas);
         UI.displayScanResults(results);
         UI.logAction('Análisis completado. Si ves un objetivo válido, haz clic para recuperar.');
         UI.scanButton.disabled = false;
@@ -226,6 +201,14 @@ const Game = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    Camera.init(document.getElementById('video-feed'), document.getElementById('drone-canvas').getContext('2d', { willReadFrequently: true }));
+    // El video oculto lo creamos aquí para más limpieza
+    const video = document.createElement('video');
+    video.playsInline = true;
+    video.autoplay = true;
+    video.muted = true;
+    video.classList.add('hidden');
+    document.body.appendChild(video);
+
+    Camera.init(video, document.getElementById('drone-canvas').getContext('2d', { willReadFrequently: true }));
     Game.init();
 });
