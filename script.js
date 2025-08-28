@@ -8,7 +8,7 @@ const UI = {
         this.permissionPrompt = document.getElementById('permission-prompt');
         this.gameContainer = document.getElementById('game-container');
         this.canvas = document.getElementById('drone-canvas');
-        this.ctx = this.canvas.getContext('2d');
+        this.ctx = this.canvas.getContext('2d', { willReadFrequently: true }); // Optimizacion para lectura frecuente
         this.objectiveList = document.getElementById('objective-list');
         this.inventoryList = document.getElementById('inventory-list');
         this.scanButton = document.getElementById('scan-button');
@@ -16,23 +16,9 @@ const UI = {
         this.actionLog = document.getElementById('action-log').querySelector('p');
         this.scanButton.addEventListener('click', () => Game.scanFrame());
     },
-    async runBootSequence(permissionCallback, aiCallback) {
-        this.bootLoader.classList.remove('hidden');
-        const lines = ['R.U.S.T. OS v1.3a', '====================', 'CHECKING DRONE CONNECTION...'];
-        for (const line of lines) {
-            this.bootText.textContent += line + '\n';
-            await new Promise(r => setTimeout(r, 200));
-        }
-        this.permissionPrompt.classList.remove('hidden');
-        await permissionCallback(); // Esperamos a que el usuario de permiso a la cámara
-        this.permissionPrompt.classList.add('hidden');
-        this.bootText.textContent += 'SIGNAL ACQUIRED. VISUAL FEED ESTABLISHED.\n';
-        this.bootText.textContent += 'LOADING AI COGNITIVE MODEL...\n';
-        await aiCallback(); // Cargamos la IA
-        this.bootText.textContent += 'AI MODEL LOADED. SYSTEM READY.\n';
-        await new Promise(r => setTimeout(r, 1000));
-        this.bootLoader.classList.add('hidden');
-        this.gameContainer.classList.remove('hidden');
+    async showBootMessage(message, delay = 200) {
+        this.bootText.textContent += message + '\n';
+        await new Promise(r => setTimeout(r, delay));
     },
     updateHUD(state) {
         this.objectiveList.innerHTML = '';
@@ -63,19 +49,24 @@ const UI = {
             const li = document.createElement('li');
             const confidence = Math.round(item.score * 100);
             li.textContent = `>> ${item.label.toUpperCase()} (Confianza: ${confidence}%)`;
-            const objective = Game.state.objectives.find(o => o.name === item.label && !o.found);
-            if (objective && confidence > 50) {
-                li.style.color = '#39ff14'; // Resaltar si es un objetivo
+            const objective = Game.state.objectives.find(o => item.label.includes(o.name) && !o.found);
+            if (objective && confidence > 40) { // Umbral de confianza
+                li.style.color = '#39ff14';
+                li.style.cursor = 'pointer';
                 li.addEventListener('click', () => Game.salvage(objective));
             }
             this.resultsList.appendChild(li);
         });
     },
-    logAction(text) { this.actionLog.textContent = `> ${text}`; }
+    logAction(text) { this.actionLog.textContent = `> ${text}`; },
+    showGame() {
+        this.bootLoader.classList.add('hidden');
+        this.gameContainer.classList.remove('hidden');
+    }
 };
 
-// --- Módulo para la Cámara y el renderizado ---
-const Renderer = {
+// --- Módulo para la Cámara y el Renderizado ---
+const Camera = {
     init(videoElement, canvasContext) {
         this.video = videoElement;
         this.ctx = canvasContext;
@@ -84,14 +75,19 @@ const Renderer = {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             this.video.srcObject = stream;
-            this.video.onloadedmetadata = () => {
-                this.ctx.canvas.width = this.video.videoWidth;
-                this.ctx.canvas.height = this.video.videoHeight;
-                this.renderLoop();
-            };
+            await new Promise(resolve => {
+                this.video.onloadedmetadata = () => {
+                    this.ctx.canvas.width = this.video.videoWidth;
+                    this.ctx.canvas.height = this.video.videoHeight;
+                    resolve();
+                };
+            });
+            this.renderLoop();
+            return true;
         } catch (err) {
             console.error("Error accessing camera:", err);
-            UI.bootText.textContent += "ERROR: CÁMARA NO DETECTADA O PERMISO DENEGADO.\n";
+            UI.showBootMessage(`ERROR: ${err.name}. PERMISO DENEGADO O CÁMARA NO DISPONIBLE.`);
+            return false;
         }
     },
     renderLoop() {
@@ -103,7 +99,6 @@ const Renderer = {
         const imageData = this.ctx.getImageData(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
         const data = imageData.data;
         for (let i = 0; i < data.length; i += 4) {
-            // Filtro Sepia + Ruido
             const r = data[i], g = data[i+1], b = data[i+2];
             const tr = 0.393 * r + 0.769 * g + 0.189 * b;
             const tg = 0.349 * r + 0.686 * g + 0.168 * b;
@@ -122,21 +117,18 @@ const Renderer = {
 
 // --- Módulo de la IA ---
 const AI = {
-    async init() { /* ... (igual que antes, carga desde ./models/...) ... */ },
-    async classifyImage(imageDataUrl) { /* ... (igual que antes) ... */ }
+    async init() {
+        try {
+            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
+            return true;
+        } catch (error) { console.error("Error loading AI model:", error); return false; }
+    },
+    async classifyImage(imageDataUrl) {
+        if (!this.classifier) return [];
+        const results = await this.classifier(imageDataUrl);
+        return results;
+    }
 };
-// Rellenando la IA para que sea completo
-AI.init = async function() {
-    try {
-        this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
-        return true;
-    } catch (error) { console.error("Error loading AI model:", error); return false; }
-};
-AI.classifyImage = async function(imageDataUrl) {
-    if (!this.classifier) return [];
-    return await this.classifier(imageDataUrl);
-};
-
 
 // --- Módulo Principal del Juego ---
 const Game = {
@@ -150,25 +142,43 @@ const Game = {
     },
     async init() {
         UI.init();
-        await UI.runBootSequence(
-            async () => {
-                const video = document.getElementById('video-feed');
-                Renderer.init(video, UI.ctx);
-                await Renderer.start();
-            },
-            async () => {
-                await AI.init();
-            }
-        );
+        
+        // --- SECUENCIA DE ARRANQUE CORREGIDA ---
+        await UI.showBootMessage('R.U.S.T. OS v1.3a');
+        await UI.showBootMessage('====================');
+        await UI.showBootMessage('CHECKING DRONE CONNECTION...');
+        
+        UI.permissionPrompt.classList.remove('hidden');
+        const cameraOK = await Camera.start(document.getElementById('video-feed'), UI.ctx);
+        UI.permissionPrompt.classList.add('hidden');
+
+        if (!cameraOK) return; // Si la cámara falla, no continuamos.
+        
+        await UI.showBootMessage('SIGNAL ACQUIRED. VISUAL FEED ESTABLISHED.');
+        await UI.showBootMessage('LOADING AI COGNITIVE MODEL...');
+        
+        const aiOK = await AI.init();
+        if (!aiOK) {
+            await UI.showBootMessage('AI MODEL FAILED TO LOAD. SYSTEM DEGRADED.');
+            return; // Si la IA falla, no continuamos.
+        }
+        
+        await UI.showBootMessage('AI MODEL LOADED. SYSTEM READY.');
+        await new Promise(r => setTimeout(r, 500));
+        
+        UI.showGame();
         UI.updateHUD(this.state);
+        UI.logAction('Dron operativo. Encuentra los objetos de la lista.');
     },
     async scanFrame() {
         UI.logAction('Capturando y analizando fotograma...');
         UI.scanButton.disabled = true;
-        const frame = Renderer.captureFrame();
+        
+        const frame = Camera.captureFrame();
         const results = (await AI.classifyImage(frame)).slice(0, 5);
+        
         UI.displayScanResults(results);
-        UI.logAction('Análisis completado. Si ves un objetivo, haz clic en él para recuperarlo.');
+        UI.logAction('Análisis completado. Si ves un objetivo válido, haz clic para recuperar.');
         UI.scanButton.disabled = false;
     },
     salvage(objective) {
@@ -190,4 +200,9 @@ const Game = {
     }
 };
 
-Game.init();
+// Inicializamos el juego al cargar la página
+document.addEventListener('DOMContentLoaded', () => {
+    // Incializamos los módulos que no dependen de la secuencia
+    Camera.init(document.getElementById('video-feed'), document.getElementById('drone-canvas').getContext('2d', { willReadFrequently: true }));
+    Game.init();
+});
