@@ -1,55 +1,54 @@
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
+// --- Módulo para la Interfaz de Usuario ---
 const UI = {
     init() {
         this.bootLoader = document.getElementById('boot-loader');
         this.bootText = document.getElementById('boot-text');
+        this.permissionPrompt = document.getElementById('permission-prompt');
         this.gameContainer = document.getElementById('game-container');
-        this.droneImage = document.getElementById('drone-image');
-        this.batteryBar = document.getElementById('battery-bar');
-        this.batteryPercent = document.getElementById('battery-percent');
+        this.canvas = document.getElementById('drone-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.objectiveList = document.getElementById('objective-list');
         this.inventoryList = document.getElementById('inventory-list');
         this.scanButton = document.getElementById('scan-button');
         this.resultsList = document.getElementById('results-list');
         this.actionLog = document.getElementById('action-log').querySelector('p');
-
-        this.scanButton.addEventListener('click', () => Game.scanLocation());
+        this.scanButton.addEventListener('click', () => Game.scanFrame());
     },
-    async runBootSequence(callback) {
+    async runBootSequence(permissionCallback, aiCallback) {
         this.bootLoader.classList.remove('hidden');
-        const lines = [
-            'R.U.S.T. OS v1.3a',
-            '====================',
-            'CHECKING DRONE CONNECTION...',
-            'SIGNAL STRENGTH: 12%',
-            'WARNING: VISUAL FEED MAY BE UNSTABLE.',
-            'LOADING AI COGNITIVE MODEL...',
-            ''
-        ];
+        const lines = ['R.U.S.T. OS v1.3a', '====================', 'CHECKING DRONE CONNECTION...'];
         for (const line of lines) {
             this.bootText.textContent += line + '\n';
             await new Promise(r => setTimeout(r, 200));
         }
-        await callback();
+        this.permissionPrompt.classList.remove('hidden');
+        await permissionCallback(); // Esperamos a que el usuario de permiso a la cámara
+        this.permissionPrompt.classList.add('hidden');
+        this.bootText.textContent += 'SIGNAL ACQUIRED. VISUAL FEED ESTABLISHED.\n';
+        this.bootText.textContent += 'LOADING AI COGNITIVE MODEL...\n';
+        await aiCallback(); // Cargamos la IA
         this.bootText.textContent += 'AI MODEL LOADED. SYSTEM READY.\n';
         await new Promise(r => setTimeout(r, 1000));
         this.bootLoader.classList.add('hidden');
         this.gameContainer.classList.remove('hidden');
     },
     updateHUD(state) {
-        const percent = Math.max(0, state.battery);
-        this.batteryPercent.textContent = `${Math.round(percent)}%`;
-        this.batteryBar.style.width = `${percent}%`;
-        if (percent < 20) this.batteryBar.style.backgroundColor = '#ff4122';
-        else this.batteryBar.style.backgroundColor = 'var(--text-color)';
-
+        this.objectiveList.innerHTML = '';
+        state.objectives.forEach(obj => {
+            const li = document.createElement('li');
+            li.textContent = `> ${obj.name.toUpperCase()}`;
+            if (obj.found) li.classList.add('found');
+            this.objectiveList.appendChild(li);
+        });
         this.inventoryList.innerHTML = '';
-        if (state.inventory.length === 0) {
+        if (state.found_items.length === 0) {
             this.inventoryList.innerHTML = '<li>(Vacío)</li>';
         } else {
-            state.inventory.forEach(item => {
+            state.found_items.forEach(item => {
                 const li = document.createElement('li');
-                li.textContent = `> ${item}`;
+                li.textContent = `> ${item.toUpperCase()}`;
                 this.inventoryList.appendChild(li);
             });
         }
@@ -57,102 +56,137 @@ const UI = {
     displayScanResults(results) {
         this.resultsList.innerHTML = '';
         if (results.length === 0) {
-            this.resultsList.innerHTML = '<li>>> NINGÚN OBJETO DE INTERÉS DETECTADO.</li>';
+            this.resultsList.innerHTML = '<li>>> INTERFERENCIAS. NINGÚN OBJETO CLARO.</li>';
             return;
         }
         results.forEach(item => {
             const li = document.createElement('li');
-            li.textContent = `>> ${item.label.toUpperCase()} (Confianza: ${Math.round(item.score * 100)}%)`;
-            li.addEventListener('click', () => Game.salvage(item.label));
+            const confidence = Math.round(item.score * 100);
+            li.textContent = `>> ${item.label.toUpperCase()} (Confianza: ${confidence}%)`;
+            const objective = Game.state.objectives.find(o => o.name === item.label && !o.found);
+            if (objective && confidence > 50) {
+                li.style.color = '#39ff14'; // Resaltar si es un objetivo
+                li.addEventListener('click', () => Game.salvage(objective));
+            }
             this.resultsList.appendChild(li);
         });
     },
-    logAction(text) {
-        this.actionLog.textContent = `> ${text}`;
-    },
-    showLocation(location) {
-        this.droneImage.src = location.image;
-        this.resultsList.innerHTML = '';
-    }
+    logAction(text) { this.actionLog.textContent = `> ${text}`; }
 };
 
-const AI = {
-    async init() {
-        const loaderProgress = document.getElementById('loader-progress');
-        // Este es un loader de mentira, porque el modelo local es tan rápido que no da tiempo a verlo.
-        // Lo dejamos para la atmósfera.
-        if(loaderProgress) loaderProgress.textContent = 'WAKING UP ENTITY...';
+// --- Módulo para la Cámara y el renderizado ---
+const Renderer = {
+    init(videoElement, canvasContext) {
+        this.video = videoElement;
+        this.ctx = canvasContext;
+    },
+    async start() {
         try {
-            // ESTA ES LA LÍNEA IMPORTANTE. APUNTA A LA CARPETA LOCAL.
-            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
-            return true;
-        } catch (error) {
-            console.error("Error loading AI model:", error);
-            if(loaderProgress) loaderProgress.textContent = 'SYSTEM_FAILURE: AI entity could not be loaded.';
-            return false;
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            this.video.srcObject = stream;
+            this.video.onloadedmetadata = () => {
+                this.ctx.canvas.width = this.video.videoWidth;
+                this.ctx.canvas.height = this.video.videoHeight;
+                this.renderLoop();
+            };
+        } catch (err) {
+            console.error("Error accessing camera:", err);
+            UI.bootText.textContent += "ERROR: CÁMARA NO DETECTADA O PERMISO DENEGADO.\n";
         }
     },
-    async classifyImage(imageUrl) {
-        if (!this.classifier) return [];
-        const results = await this.classifier(imageUrl);
-        return results.slice(0, 5);
+    renderLoop() {
+        this.ctx.drawImage(this.video, 0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+        this.applyFilters();
+        requestAnimationFrame(() => this.renderLoop());
+    },
+    applyFilters() {
+        const imageData = this.ctx.getImageData(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            // Filtro Sepia + Ruido
+            const r = data[i], g = data[i+1], b = data[i+2];
+            const tr = 0.393 * r + 0.769 * g + 0.189 * b;
+            const tg = 0.349 * r + 0.686 * g + 0.168 * b;
+            const tb = 0.272 * r + 0.534 * g + 0.131 * b;
+            const noise = (0.5 - Math.random()) * 20;
+            data[i] = tr + noise;
+            data[i+1] = tg + noise;
+            data[i+2] = tb + noise;
+        }
+        this.ctx.putImageData(imageData, 0, 0);
+    },
+    captureFrame() {
+        return this.ctx.canvas.toDataURL('image/jpeg');
     }
 };
 
+// --- Módulo de la IA ---
+const AI = {
+    async init() { /* ... (igual que antes, carga desde ./models/...) ... */ },
+    async classifyImage(imageDataUrl) { /* ... (igual que antes) ... */ }
+};
+// Rellenando la IA para que sea completo
+AI.init = async function() {
+    try {
+        this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
+        return true;
+    } catch (error) { console.error("Error loading AI model:", error); return false; }
+};
+AI.classifyImage = async function(imageDataUrl) {
+    if (!this.classifier) return [];
+    return await this.classifier(imageDataUrl);
+};
+
+
+// --- Módulo Principal del Juego ---
 const Game = {
     state: {
-        battery: 100,
-        inventory: [],
-        currentLocation: 0
+        objectives: [
+            { name: 'bottle', found: false },
+            { name: 'cup', found: false },
+            { name: 'book', found: false }
+        ],
+        found_items: [],
     },
-    locations: [
-        {
-            image: 'scenes/scene1.jpg',
-            items: ['botiquín', 'lata de comida', 'chatarra']
-        },
-    ],
     async init() {
         UI.init();
-        // Usamos un loader de mentira porque el modelo local carga al instante.
-        // Así mantenemos la atmósfera del arranque.
-        UI.runBootSequence(async () => {
-             await AI.init();
-        });
-        
-        UI.showLocation(this.locations[this.state.currentLocation]);
+        await UI.runBootSequence(
+            async () => {
+                const video = document.getElementById('video-feed');
+                Renderer.init(video, UI.ctx);
+                await Renderer.start();
+            },
+            async () => {
+                await AI.init();
+            }
+        );
         UI.updateHUD(this.state);
-        setInterval(() => this.gameLoop(), 1000); 
     },
-    gameLoop() {
-        if (this.state.battery > 0) {
-            this.state.battery -= 0.5;
-            UI.updateHUD(this.state);
-        } else if (!UI.scanButton.disabled) {
-            UI.logAction('BATERÍA AGOTADA. DRON DESCONECTADO.');
-            UI.scanButton.disabled = true;
-        }
-    },
-    async scanLocation() {
-        if (this.state.battery <= 10) {
-            UI.logAction('Batería demasiado baja para escanear.');
-            return;
-        }
-        UI.logAction('Escaneando... Consumo: 10% de batería.');
-        this.state.battery -= 10;
+    async scanFrame() {
+        UI.logAction('Capturando y analizando fotograma...');
         UI.scanButton.disabled = true;
-        
-        const imageUrl = this.locations[this.state.currentLocation].image;
-        const results = await AI.classifyImage(imageUrl);
-        
+        const frame = Renderer.captureFrame();
+        const results = (await AI.classifyImage(frame)).slice(0, 5);
         UI.displayScanResults(results);
-        UI.logAction('Análisis completado. Selecciona un objeto para intentar recuperarlo.');
-        UI.updateHUD(this.state);
+        UI.logAction('Análisis completado. Si ves un objetivo, haz clic en él para recuperarlo.');
         UI.scanButton.disabled = false;
     },
-    salvage(itemLabel) {
-        UI.logAction(`Intentando recuperar ${itemLabel}...`);
-        this.state.inventory.push(itemLabel.toUpperCase());
-        UI.updateHUD(this.state);
+    salvage(objective) {
+        const obj = this.state.objectives.find(o => o.name === objective.name);
+        if (obj && !obj.found) {
+            obj.found = true;
+            this.state.found_items.push(obj.name);
+            UI.logAction(`OBJETIVO [${obj.name.toUpperCase()}] RECUPERADO.`);
+            UI.updateHUD(this.state);
+            this.checkWinCondition();
+        }
+    },
+    checkWinCondition() {
+        const allFound = this.state.objectives.every(o => o.found);
+        if (allFound) {
+            UI.logAction('TODOS LOS OBJETIVOS RECUPERADOS. MISIÓN CUMPLIDA, CARROÑERO.');
+            UI.scanButton.disabled = true;
+        }
     }
 };
 
