@@ -12,27 +12,26 @@
 <body>
     <div class="scanlines"></div>
     <div class="vignette"></div>
-    <div id="static-overlay"></div>
-
-    <div id="boot-loader" class="hidden">
+    
+    <div id="boot-loader">
         <div id="boot-text"></div>
+        <p id="permission-prompt" class="hidden">>> Se necesita acceso a la cámara para iniciar el dron...</p>
     </div>
 
     <div id="game-container" class="hidden">
         <div id="drone-view-container">
-            <img id="drone-image" src="" alt="Vista del dron">
+            <canvas id="drone-canvas"></canvas>
+            <video id="video-feed" playsinline autoplay muted class="hidden"></video>
+            <div id="static-overlay"></div>
         </div>
 
         <div id="hud">
-            <div id="hud-battery">
-                <span>BATERÍA DEL DRON</span>
-                <div class="progress-bar-container">
-                    <div id="battery-bar" class="progress-bar"></div>
-                </div>
-                <span id="battery-percent">100%</span>
+            <div id="hud-objective">
+                <span>OBJETIVOS DE BÚSQUEDA</span>
+                <ul id="objective-list"></ul>
             </div>
             <div id="hud-inventory">
-                <span>CARGA</span>
+                <span>OBJETOS RECUPERADOS</span>
                 <ul id="inventory-list">
                     <li>(Vacío)</li>
                 </ul>
@@ -40,12 +39,12 @@
         </div>
 
         <div id="controls">
-            <button id="scan-button">ESCANEAR ZONA</button>
+            <button id="scan-button">ESCANEAR Y CAPTURAR IMAGEN</button>
             <div id="scan-results">
                 <p class="scan-title">> ANÁLISIS DE IMAGEN IA:</p>
                 <ul id="results-list"></ul>
             </div>
-            <div id="action-log"><p>> Esperando órdenes...</p></div>
+            <div id="action-log"><p>> Dron en espera...</p></div>
         </div>
     </div>
 
