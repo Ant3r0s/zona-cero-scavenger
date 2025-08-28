@@ -8,7 +8,7 @@ const UI = {
         this.permissionPrompt = document.getElementById('permission-prompt');
         this.gameContainer = document.getElementById('game-container');
         this.canvas = document.getElementById('drone-canvas');
-        this.ctx = this.canvas.getContext('2d', { willReadFrequently: true }); // Optimizacion para lectura frecuente
+        this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
         this.objectiveList = document.getElementById('objective-list');
         this.inventoryList = document.getElementById('inventory-list');
         this.scanButton = document.getElementById('scan-button');
@@ -50,7 +50,7 @@ const UI = {
             const confidence = Math.round(item.score * 100);
             li.textContent = `>> ${item.label.toUpperCase()} (Confianza: ${confidence}%)`;
             const objective = Game.state.objectives.find(o => item.label.includes(o.name) && !o.found);
-            if (objective && confidence > 40) { // Umbral de confianza
+            if (objective && confidence > 40) {
                 li.style.color = '#39ff14';
                 li.style.cursor = 'pointer';
                 li.addEventListener('click', () => Game.salvage(objective));
@@ -119,9 +119,19 @@ const Camera = {
 const AI = {
     async init() {
         try {
-            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224', { quantized: true });
+            // ==========================================================
+            // =================== EL PUTO ARREGLO ======================
+            // Quitamos la opción ", { quantized: true }" que lo estaba jodiendo todo.
+            // La librería es lo bastante lista para encontrar el archivo _quantized.onnx por sí misma.
+            this.classifier = await pipeline('image-classification', './models/mobilenet_v2_1.0_224');
+            // ==========================================================
+            // ==========================================================
             return true;
-        } catch (error) { console.error("Error loading AI model:", error); return false; }
+        } catch (error) {
+            console.error("Error loading AI model:", error);
+            UI.showBootMessage('SYSTEM_FAILURE: AI entity could not be loaded.');
+            return false;
+        }
     },
     async classifyImage(imageDataUrl) {
         if (!this.classifier) return [];
@@ -143,16 +153,15 @@ const Game = {
     async init() {
         UI.init();
         
-        // --- SECUENCIA DE ARRANQUE CORREGIDA ---
         await UI.showBootMessage('R.U.S.T. OS v1.3a');
         await UI.showBootMessage('====================');
         await UI.showBootMessage('CHECKING DRONE CONNECTION...');
         
         UI.permissionPrompt.classList.remove('hidden');
-        const cameraOK = await Camera.start(document.getElementById('video-feed'), UI.ctx);
+        const cameraOK = await Camera.start();
         UI.permissionPrompt.classList.add('hidden');
 
-        if (!cameraOK) return; // Si la cámara falla, no continuamos.
+        if (!cameraOK) return;
         
         await UI.showBootMessage('SIGNAL ACQUIRED. VISUAL FEED ESTABLISHED.');
         await UI.showBootMessage('LOADING AI COGNITIVE MODEL...');
@@ -160,7 +169,7 @@ const Game = {
         const aiOK = await AI.init();
         if (!aiOK) {
             await UI.showBootMessage('AI MODEL FAILED TO LOAD. SYSTEM DEGRADED.');
-            return; // Si la IA falla, no continuamos.
+            return;
         }
         
         await UI.showBootMessage('AI MODEL LOADED. SYSTEM READY.');
@@ -200,9 +209,7 @@ const Game = {
     }
 };
 
-// Inicializamos el juego al cargar la página
 document.addEventListener('DOMContentLoaded', () => {
-    // Incializamos los módulos que no dependen de la secuencia
     Camera.init(document.getElementById('video-feed'), document.getElementById('drone-canvas').getContext('2d', { willReadFrequently: true }));
     Game.init();
 });
