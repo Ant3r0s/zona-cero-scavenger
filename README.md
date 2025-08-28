@@ -1,19 +1,15 @@
-# Carroñero de la Zona Cero ☢️
+# Carroñero de la Zona Cero ☢️ (Live Edition)
 
-> "La batería del dron está al 12%... la estática casi no me deja ver, pero la IA dice que hay algo útil ahí dentro. ¿Me la juego?"
+> "La conexión con el dron es inestable, pero la cámara funciona. Es hora de ver qué queda ahí fuera... en mi propia habitación."
 
-Un juego de supervivencia e investigación post-apocalíptico. Usas un dron con una conexión inestable para explorar ruinas, y dependes de una IA de análisis de imagen para identificar objetos. La IA no es perfecta y cada incursión es una apuesta.
+Un juego de supervivencia e investigación en Realidad Aumentada. El juego utiliza la cámara del dispositivo del usuario para convertir su entorno en la "Zona Cero".
 
-Este proyecto se ejecuta 100% en el navegador del usuario gracias a un modelo de IA local.
+El jugador debe encontrar objetos del mundo real que coincidan con una lista de objetivos, usando un escáner de IA en el navegador que analiza el vídeo en tiempo real. La transmisión de vídeo se altera visualmente para crear una atmósfera post-apocalíptica.
 
 ## 🚀 Stack Tecnológico
 
-* **HTML5**
-* **CSS3** (Estética retro-futurista, post-apocalíptica, con efectos de estática y CRT)
-* **JavaScript (ESM)**
+* **HTML5** (`<video>`, `<canvas>`)
+* **CSS3** (Filtros de vídeo en tiempo real, estética retro-futurista)
+* **JavaScript (ESM)** y la API **WebRTC (`getUserMedia`)** para el acceso a la cámara.
 * **Transformers.js** para la ejecución de modelos de IA en el navegador.
-* **Modelo de IA:** `Xenova/mobilenet_v2_1.0_224` (versión cuantizada y auto-alojada) para clasificación de imágenes.
-
-## 🏃 Ejecución
-
-El proyecto está diseñado para funcionar directamente en cualquier navegador moderno una vez desplegado en un servidor web (como GitHub Pages).
+* **Modelo de IA:** `Xenova/mobilenet_v_1.0_224` (auto-alojado) para clasificación de imágenes.
